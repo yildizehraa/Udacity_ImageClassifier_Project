@@ -14,7 +14,7 @@ def arg_parser():
     parser.add_argument('--data_dir', action="store", nargs='*', default="./flowers/")
     parser.add_argument('--learning_rate', dest="learning_rate", action="store", default=0.001)
     parser.add_argument('--hidden_units', type=int, dest="hidden_units", action="store", default=120)
-    parser.add_argument('--epochs', dest="epochs", action="store", type=int, default=3)
+    parser.add_argument('--epochs', dest="epochs", action="store", type=int, default=1)
     parser.add_argument('--gpu', dest="gpu", action="store", default="gpu")
     parser.add_argument('--dropout', dest = "dropout", action = "store", default = 0.5)
     args = parser.parse_args()
@@ -66,51 +66,70 @@ def loadData(data = "./flowers"):
     trainLoader = torch.utils.data.DataLoader(image_datasets['train'], batch_size = 64, shuffle = True)
     validationLoader = torch.utils.data.DataLoader(image_datasets['valid'], batch_size = 32, shuffle = True)
     testLoader = torch.utils.data.DataLoader(image_datasets['test'], batch_size = 32, shuffle = True)        
+    train_data_size = len(image_datasets['train'])
+    validation_data_size = len(image_datasets['valid'])
+    test_data_size =  len(image_datasets['test'])
+
+    return trainLoader, validationLoader, testLoader, image_datasets, train_data_size, validation_data_size
+
+
+
+def setModel(lr, hiddenUnits, epochs, architecture):
+    if architecture == 'vgg16':
+        architecture="vgg16"
+        model = models.vgg16(pretrained=True)
+        model.name = "vgg16"
         
-    return trainLoader, validationLoader, testLoader, image_datasets
-
-
-
-def setModel(architecture):
-    architecture="vgg16"
-    model = models.vgg16(pretrained=True)
-    model.name = "vgg16"
-        
-    for param in model.parameters():
-        param.requires_grad = False 
+        for param in model.parameters():
+            param.requires_grad = False 
         
           
-    classifier = nn.Sequential(OrderedDict([
+        classifier = nn.Sequential(OrderedDict([
             ('inputs', nn.Linear(25088, 120)),
             ('rl1', nn.ReLU()),
             ('dropout', nn.Dropout(0.5)),
-            ('hiddenLayer_1', nn.Linear(120, 90)),
+            ('hiddenLayer_1', nn.Linear(hiddenUnits, 90)),
             ('rl2', nn.ReLU()),
             ('hiddenLayer_2', nn.Linear(90,70)),
             ('rl3', nn.ReLU()),
             ('hiddenLayer_3', nn.Linear(70, 102)),
             ('output', nn.LogSoftmax(dim=1))]))
 
-    model.classifier = classifier
-    
+        model.classifier = classifier
+        
+    elif architecture == 'Densenet':
+        model = models.densenet121(pretrained=True)
+        for param in model.parameters():
+            param.requires_grad = False
+        classifier = nn.Sequential(OrderedDict([
+            ('fc1', nn.Linear(1024, 512)),
+            ('relu', nn.ReLU()),
+            ('dropout', nn.Dropout()),
+            ('fc2', nn.Linear(512, 102)),
+            ('output', nn.LogSoftmax(dim=1))
+        ]))
+        model.classifier = classifier
+        
+    else:
+        raise Exception("Architecture not accepted")
+        
     criterion = nn.NLLLoss()
-    optimizer = optim.Adam(model.classifier.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.classifier.parameters(), lr)
 
     model.cuda()
 
     return model, criterion, optimizer
 
 
-def trainModel(model, criterion, optimizer, epochs, trainLoader, power, validationLoader):
-    epochs = 3
-    power='gpu'
+def trainModel(model, criterion, optimizer, epochs, trainLoader, power, validationLoader, train_data_size, validation_data_size):
+    model.cuda()
     for epoch in range(epochs):
         model.train()
         print("Epoch: {}/{}".format(epoch+1, epochs))
-        trainLoss_total = 0.0
+        trainLoss  = 0.0
         trainAcc = 0.0
-        validloss = 0.0
-        validacc = 0.0
+        valid_loss = 0.0
+        valid_acc = 0.0
         for i, (inputs, labels) in enumerate(trainLoader):
             model.eval()
             inputs = inputs.to('cuda')
@@ -125,7 +144,7 @@ def trainModel(model, criterion, optimizer, epochs, trainLoader, power, validati
         
             optimizer.step()
         
-            trainLoss_total += loss.item() * inputs.size(0)
+            trainLoss += loss.item() * inputs.size(0)
                 
             #accuracy
             ret, ps = torch.max(outputs.data, 1)
@@ -137,7 +156,31 @@ def trainModel(model, criterion, optimizer, epochs, trainLoader, power, validati
             trainAcc += accuracy.item() * inputs.size(0)
                
             print("Iteration : {:03d}, Loss on trainig: {:.4f}, Accuracy: {:.4f}".format(i, loss.item(), accuracy.item()))
-            
+    
+        with torch.no_grad():
+            model.eval()
+            for j, (inputs, labels) in enumerate(validationLoader):
+                inputs = inputs.to('cuda')
+                labels = labels.to('cuda')
+                outputs = model(inputs)
+
+                loss = criterion(outputs, labels)
+                valid_loss += loss.item() * inputs.size(0)
+
+                ret, predictions = torch.max(outputs.data, 1)
+                correct_prediction_counts = predictions.eq(labels.data.view_as(predictions))
+
+                acc = torch.mean(correct_prediction_counts.type(torch.FloatTensor))
+                valid_acc +=acc.item() * inputs.size(0)
+
+            avg_train_loss = trainLoss/train_data_size
+            avg_train_acc = trainAcc/train_data_size
+
+            avg_valid_loss = valid_loss/validation_data_size
+            avg_valid_acc = valid_acc/validation_data_size
+
+            print(f'Epoch : {epoch}, Training: Loss: f{avg_train_loss}, Accuracy: {avg_train_acc*100}%, \n\t\tValidation : Loss : {avg_valid_loss}, Accuracy: { avg_valid_acc*100}%')
+    
     correct,total = 0,0
     model.eval()
   #  model.to('cuda')
@@ -177,15 +220,15 @@ def main():
         
     args = arg_parser()
     
-    trainLoad, validLoad, testLoad, image_datasets = loadData(args.data_dir)
+    trainLoad, validLoad, testLoad, image_datasets, trainSize, validSize = loadData(args.data_dir)
    
     
-    model, criterion, optimizer = setModel(architecture=args.arch)
+    model, criterion, optimizer = setModel(args.learning_rate, args.hidden_units, args.epochs, architecture=args.arch)
        
     
     print(' *** Training Started *** ')
     
-    trainedModel = trainModel(model, criterion, optimizer, args.epochs, trainLoad, args.gpu, validLoad)
+    trainedModel = trainModel(model, criterion, optimizer, args.epochs, trainLoad, args.gpu, validLoad, trainSize, validSize)
     
     print(' *** Training Ended *** ')
     

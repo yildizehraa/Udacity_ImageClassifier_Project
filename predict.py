@@ -12,11 +12,11 @@ from torchvision import datasets, transforms, models
 
 def arg_parser():
     parser = argparse.ArgumentParser(description="Predict.py")
-    parser.add_argument('--input_img', default='/home/workspace/ImageClassifier/flowers/test/1/image_06752.jpg', action="store", type = str)
-    parser.add_argument('--checkpoint', default='/home/workspace/ImageClassifier/checkpoint.pth', nargs='*', action="store",type = str)
-    parser.add_argument('--top_k', default=5, dest="top_k", action="store", type=int)
-    parser.add_argument('--category_names', dest="category_names", action="store", default='cat_to_name.json')
-    parser.add_argument('--gpu', default="gpu", action="store", dest="gpu")
+    parser.add_argument('--input_img', default='/home/workspace/ImageClassifier/flowers/test/1/image_06752.jpg', action="store", type = str, help='Give the image path to classify')
+    parser.add_argument('--checkpoint', default='/home/workspace/ImageClassifier/checkpoint.pth', nargs='*', action="store",type = str, help='The path of the checkpoint to load data')
+    parser.add_argument('--top_k', default=5, dest="top_k", action="store", type=int, help='Top K matches')
+    parser.add_argument('--category_names', dest="category_names", action="store", default='cat_to_name.json', help='Category to name json file')
+    parser.add_argument('--gpu', default="gpu", action="store", dest="gpu", help='Device GPU')
     args = parser.parse_args()
     
   
